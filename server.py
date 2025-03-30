@@ -1,39 +1,49 @@
 import asyncio
 import sys
 
+clients = set() # Set to store clients
+
+"""Function to handle connected clients"""
 async def handle_client(reader, writer):
-    # Get IP addr and port from client
     addr = writer.get_extra_info('peername')
     print(f"Accepted connection from {addr}")
+    clients.add(writer)
 
     try:
+        # If only one client connected, sleep and wait for more clients to connect
         while True:
-            # Read message from client
-            message = await reader.read(1024)
-            if not message:
-                # Writer closed from client side, break loop to close connection 
-                print(f"Closing connection to {addr}")
-                break
+            if len(clients) > 1:
+                message = await reader.read(1024)
+                if not message:
+                    print(f"Closing connection to {addr}")
+                    break
 
-            print(f"Received {message.decode('utf-8')} from {addr}")
-            # Write message back and make sure it's sent completely
-            writer.write(message)
-            await writer.drain()
+                decoded_message = message.decode('utf-8')
+                print(f"Broadcasting: {decoded_message}")
+
+                # Send message to all clients except sender
+                for client in list(clients):
+                    if client != writer:
+                        try:
+                            client.write(message)
+                            await client.drain()
+                        except Exception:
+                            clients.remove(client)
+            else:
+                await asyncio.sleep(2)
 
     except asyncio.CancelledError:
         print(f"Connection to {addr} cancelled")
-    
+
     finally:
-        # Close connection
         writer.close()
         await writer.wait_closed()
+        clients.discard(writer)
 
 async def main(host, port):
-    # Start server
     server = await asyncio.start_server(handle_client, host, port)
     print(f"Listening on ('{host}', {port})")
 
-    # Keep server running indefinitely
     async with server:
         await server.serve_forever()
 
